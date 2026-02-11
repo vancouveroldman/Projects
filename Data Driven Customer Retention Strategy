@@ -1,1 +1,105 @@
+# src/make_synth_data.py
+import numpy as np
+import pandas as pd
+
+def make_synthetic_customers(n: int = 10_000, seed: int = 42) -> pd.DataFrame:
+    """
+    Generate a synthetic customer dataset (NO real company data).
+    Features are generic engagement/value signals commonly used for retention work.
+    """
+    rng = np.random.default_rng(seed)
+
+    # Latent segments to make data look realistic (5 underlying types)
+    seg = rng.choice([0, 1, 2, 3, 4], size=n, p=[0.18, 0.20, 0.22, 0.25, 0.15])
+
+    # Base feature arrays
+    recency_days = np.zeros(n)
+    txn_count_90d = np.zeros(n)
+    avg_txn_value = np.zeros(n)
+    tenure_days = np.zeros(n)
+    web_sessions_30d = np.zeros(n)
+    app_sessions_30d = np.zeros(n)
+    support_contacts_90d = np.zeros(n)
+    promo_response_rate = np.zeros(n)
+    chargeback_flag = np.zeros(n)
+
+    # Segment profiles (tweak freely)
+    for i in range(n):
+        s = seg[i]
+        if s == 0:  # VIP Loyalists
+            recency_days[i] = rng.gamma(2.0, 3.0)          # recent
+            txn_count_90d[i] = rng.poisson(18)
+            avg_txn_value[i] = rng.normal(85, 15)
+            tenure_days[i] = rng.normal(1100, 250)
+            web_sessions_30d[i] = rng.poisson(10)
+            app_sessions_30d[i] = rng.poisson(12)
+            support_contacts_90d[i] = rng.poisson(1)
+            promo_response_rate[i] = rng.beta(2, 6)
+            chargeback_flag[i] = rng.binomial(1, 0.01)
+
+        elif s == 1:  # At-Risk High Value
+            recency_days[i] = rng.gamma(5.0, 12.0)         # less recent
+            txn_count_90d[i] = rng.poisson(10)
+            avg_txn_value[i] = rng.normal(95, 20)
+            tenure_days[i] = rng.normal(900, 280)
+            web_sessions_30d[i] = rng.poisson(6)
+            app_sessions_30d[i] = rng.poisson(5)
+            support_contacts_90d[i] = rng.poisson(2)
+            promo_response_rate[i] = rng.beta(3, 5)
+            chargeback_flag[i] = rng.binomial(1, 0.02)
+
+        elif s == 2:  # Deal-Driven
+            recency_days[i] = rng.gamma(3.0, 8.0)
+            txn_count_90d[i] = rng.poisson(8)
+            avg_txn_value[i] = rng.normal(45, 10)
+            tenure_days[i] = rng.normal(700, 220)
+            web_sessions_30d[i] = rng.poisson(7)
+            app_sessions_30d[i] = rng.poisson(6)
+            support_contacts_90d[i] = rng.poisson(1)
+            promo_response_rate[i] = rng.beta(6, 2)        # high promo responsiveness
+            chargeback_flag[i] = rng.binomial(1, 0.02)
+
+        elif s == 3:  # New / Growing
+            recency_days[i] = rng.gamma(2.0, 5.0)
+            txn_count_90d[i] = rng.poisson(4)
+            avg_txn_value[i] = rng.normal(35, 8)
+            tenure_days[i] = rng.normal(120, 60)           # newer
+            web_sessions_30d[i] = rng.poisson(9)
+            app_sessions_30d[i] = rng.poisson(8)
+            support_contacts_90d[i] = rng.poisson(1)
+            promo_response_rate[i] = rng.beta(4, 4)
+            chargeback_flag[i] = rng.binomial(1, 0.01)
+
+        else:  # 4 Dormant / Low Engagement
+            recency_days[i] = rng.gamma(8.0, 20.0)         # very stale
+            txn_count_90d[i] = rng.poisson(1)
+            avg_txn_value[i] = rng.normal(20, 6)
+            tenure_days[i] = rng.normal(600, 260)
+            web_sessions_30d[i] = rng.poisson(1)
+            app_sessions_30d[i] = rng.poisson(1)
+            support_contacts_90d[i] = rng.poisson(0)
+            promo_response_rate[i] = rng.beta(2, 8)
+            chargeback_flag[i] = rng.binomial(1, 0.03)
+
+    # Clean up / clip
+    df = pd.DataFrame({
+        "customer_id": [f"C{str(i).zfill(6)}" for i in range(n)],
+        "recency_days": np.clip(recency_days, 0, 365).round(0).astype(int),
+        "txn_count_90d": np.clip(txn_count_90d, 0, None).astype(int),
+        "avg_txn_value": np.clip(avg_txn_value, 1, None).round(2),
+        "tenure_days": np.clip(tenure_days, 1, None).round(0).astype(int),
+        "web_sessions_30d": np.clip(web_sessions_30d, 0, None).astype(int),
+        "app_sessions_30d": np.clip(app_sessions_30d, 0, None).astype(int),
+        "support_contacts_90d": np.clip(support_contacts_90d, 0, None).astype(int),
+        "promo_response_rate": np.clip(promo_response_rate, 0, 1).round(3),
+        "chargeback_flag": chargeback_flag.astype(int),
+    })
+
+    return df
+
+if __name__ == "__main__":
+    df = make_synthetic_customers(n=10_000, seed=42)
+    df.to_csv("data/customers_synth.csv", index=False)
+    print("Saved: data/customers_synth.csv")
+    print(df.head())
 
