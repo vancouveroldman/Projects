@@ -131,3 +131,38 @@ if __name__ == "__main__":
 
     print("Saved: reports/cluster_profile.csv")
     print(profile[["cluster_id", "cluster_name", "cluster_size", "retention_strategy"]])
+
+#Heat map
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+FEATURES = [
+    "recency_days",
+    "txn_count_90d",
+    "avg_txn_value",
+    "tenure_days",
+    "web_sessions_30d",
+    "app_sessions_30d",
+    "support_contacts_90d",
+    "promo_response_rate",
+]
+
+df = pd.read_csv("data/customers_clustered.csv")  # must include cluster_id
+
+profile = df.groupby("cluster_id")[FEATURES].mean()
+
+# Normalize 0–1 so features are comparable visually
+profile_norm = (profile - profile.min()) / (profile.max() - profile.min())
+
+plt.figure(figsize=(11, 5))
+plt.imshow(profile_norm.values, aspect="auto")
+plt.title("Customer Segment Profiles (Normalized Feature Means)")
+plt.xlabel("Features")
+plt.ylabel("Cluster ID")
+plt.xticks(range(len(FEATURES)), FEATURES, rotation=35, ha="right")
+plt.yticks(range(profile_norm.shape[0]), profile_norm.index.astype(str))
+plt.colorbar(label="Normalized (0–1)")
+plt.tight_layout()
+plt.show()
+
