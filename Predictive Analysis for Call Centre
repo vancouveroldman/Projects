@@ -1,0 +1,49 @@
+import pandas as pd
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+from .config import PROCESSED_CSV, DATE_COL, TARGET_COL, FORECAST_DAYS, FIGURES_DIR
+from .plot_utils import plot_actual_vs_forecast
+
+def train_arima_forecast(df, horizon=FORECAST_DAYS):
+    """
+    Simple seasonal ARIMA (SARIMAX):
+    - weekly seasonality (7)
+    """
+    df = df.copy()
+    df[DATE_COL] = pd.to_datetime(df[DATE_COL])
+    df = df.sort_values(DATE_COL)
+
+    train = df.iloc[:-horizon]
+    test = df.iloc[-horizon:]
+
+    y_train = train.set_index(DATE_COL)[TARGET_COL]
+
+    model = SARIMAX(
+        y_train,
+        order=(1, 1, 1),
+        seasonal_order=(1, 1, 1, 7),
+        enforce_stationarity=False,
+        enforce_invertibility=False,
+    )
+    res = model.fit(disp=False)
+
+    forecast = res.get_forecast(steps=horizon).predicted_mean
+    out = test[[DATE_COL, TARGET_COL]].copy()
+    out["arima_forecast"] = forecast.values
+    return out
+
+def main():
+    df = pd.read_csv(PROCESSED_CSV)
+    out = train_arima_forecast(df)
+
+    out_path = FIGURES_DIR / "arima_actual_vs_forecast.png"
+    plot_actual_vs_forecast(
+        out, DATE_COL, TARGET_COL, "arima_forecast",
+        "ARIMA (SARIMAX) – Actual vs Forecast (Holdout)",
+        out_path
+    )
+    out.to_csv(FIGURES_DIR / "arima_holdout_predictions.csv", index=False)
+    print(f"[train_arima] Saved chart -> {out_path}")
+
+if __name__ == "__main__":
+    main()
