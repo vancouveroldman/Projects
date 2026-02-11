@@ -1,105 +1,133 @@
-# src/make_synth_data.py
-import numpy as np
 import pandas as pd
+import numpy as np
 
-def make_synthetic_customers(n: int = 10_000, seed: int = 42) -> pd.DataFrame:
-    """
-    Generate a synthetic customer dataset (NO real company data).
-    Features are generic engagement/value signals commonly used for retention work.
-    """
-    rng = np.random.default_rng(seed)
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 
-    # Latent segments to make data look realistic (5 underlying types)
-    seg = rng.choice([0, 1, 2, 3, 4], size=n, p=[0.18, 0.20, 0.22, 0.25, 0.15])
+FEATURES = [
+    "recency_days",
+    "txn_count_90d",
+    "avg_txn_value",
+    "tenure_days",
+    "web_sessions_30d",
+    "app_sessions_30d",
+    "support_contacts_90d",
+    "promo_response_rate",
+    "chargeback_flag",
+]
 
-    # Base feature arrays
-    recency_days = np.zeros(n)
-    txn_count_90d = np.zeros(n)
-    avg_txn_value = np.zeros(n)
-    tenure_days = np.zeros(n)
-    web_sessions_30d = np.zeros(n)
-    app_sessions_30d = np.zeros(n)
-    support_contacts_90d = np.zeros(n)
-    promo_response_rate = np.zeros(n)
-    chargeback_flag = np.zeros(n)
+def build_pipeline(k: int, random_state: int = 42) -> Pipeline:
+    pre = ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), FEATURES),
+        ],
+        remainder="drop",
+        verbose_feature_names_out=False
+    )
 
-    # Segment profiles (tweak freely)
-    for i in range(n):
-        s = seg[i]
-        if s == 0:  # VIP Loyalists
-            recency_days[i] = rng.gamma(2.0, 3.0)          # recent
-            txn_count_90d[i] = rng.poisson(18)
-            avg_txn_value[i] = rng.normal(85, 15)
-            tenure_days[i] = rng.normal(1100, 250)
-            web_sessions_30d[i] = rng.poisson(10)
-            app_sessions_30d[i] = rng.poisson(12)
-            support_contacts_90d[i] = rng.poisson(1)
-            promo_response_rate[i] = rng.beta(2, 6)
-            chargeback_flag[i] = rng.binomial(1, 0.01)
+    model = KMeans(
+        n_clusters=k,
+        n_init="auto",
+        random_state=random_state
+    )
 
-        elif s == 1:  # At-Risk High Value
-            recency_days[i] = rng.gamma(5.0, 12.0)         # less recent
-            txn_count_90d[i] = rng.poisson(10)
-            avg_txn_value[i] = rng.normal(95, 20)
-            tenure_days[i] = rng.normal(900, 280)
-            web_sessions_30d[i] = rng.poisson(6)
-            app_sessions_30d[i] = rng.poisson(5)
-            support_contacts_90d[i] = rng.poisson(2)
-            promo_response_rate[i] = rng.beta(3, 5)
-            chargeback_flag[i] = rng.binomial(1, 0.02)
+    pipe = Pipeline([
+        ("preprocess", pre),
+        ("kmeans", model),
+    ])
+    return pipe
 
-        elif s == 2:  # Deal-Driven
-            recency_days[i] = rng.gamma(3.0, 8.0)
-            txn_count_90d[i] = rng.poisson(8)
-            avg_txn_value[i] = rng.normal(45, 10)
-            tenure_days[i] = rng.normal(700, 220)
-            web_sessions_30d[i] = rng.poisson(7)
-            app_sessions_30d[i] = rng.poisson(6)
-            support_contacts_90d[i] = rng.poisson(1)
-            promo_response_rate[i] = rng.beta(6, 2)        # high promo responsiveness
-            chargeback_flag[i] = rng.binomial(1, 0.02)
+def evaluate_k(df: pd.DataFrame, ks=range(2, 11)) -> pd.DataFrame:
+    rows = []
+    X = df[FEATURES].copy()
 
-        elif s == 3:  # New / Growing
-            recency_days[i] = rng.gamma(2.0, 5.0)
-            txn_count_90d[i] = rng.poisson(4)
-            avg_txn_value[i] = rng.normal(35, 8)
-            tenure_days[i] = rng.normal(120, 60)           # newer
-            web_sessions_30d[i] = rng.poisson(9)
-            app_sessions_30d[i] = rng.poisson(8)
-            support_contacts_90d[i] = rng.poisson(1)
-            promo_response_rate[i] = rng.beta(4, 4)
-            chargeback_flag[i] = rng.binomial(1, 0.01)
+    for k in ks:
+        pipe = build_pipeline(k)
+        labels = pipe.fit_predict(df)
+        # Need scaled data for silhouette
+        X_scaled = pipe.named_steps["preprocess"].transform(df)
+        sil = silhouette_score(X_scaled, labels)
 
-        else:  # 4 Dormant / Low Engagement
-            recency_days[i] = rng.gamma(8.0, 20.0)         # very stale
-            txn_count_90d[i] = rng.poisson(1)
-            avg_txn_value[i] = rng.normal(20, 6)
-            tenure_days[i] = rng.normal(600, 260)
-            web_sessions_30d[i] = rng.poisson(1)
-            app_sessions_30d[i] = rng.poisson(1)
-            support_contacts_90d[i] = rng.poisson(0)
-            promo_response_rate[i] = rng.beta(2, 8)
-            chargeback_flag[i] = rng.binomial(1, 0.03)
+        inertia = pipe.named_steps["kmeans"].inertia_
+        rows.append({"k": k, "silhouette": sil, "inertia": inertia})
 
-    # Clean up / clip
-    df = pd.DataFrame({
-        "customer_id": [f"C{str(i).zfill(6)}" for i in range(n)],
-        "recency_days": np.clip(recency_days, 0, 365).round(0).astype(int),
-        "txn_count_90d": np.clip(txn_count_90d, 0, None).astype(int),
-        "avg_txn_value": np.clip(avg_txn_value, 1, None).round(2),
-        "tenure_days": np.clip(tenure_days, 1, None).round(0).astype(int),
-        "web_sessions_30d": np.clip(web_sessions_30d, 0, None).astype(int),
-        "app_sessions_30d": np.clip(app_sessions_30d, 0, None).astype(int),
-        "support_contacts_90d": np.clip(support_contacts_90d, 0, None).astype(int),
-        "promo_response_rate": np.clip(promo_response_rate, 0, 1).round(3),
-        "chargeback_flag": chargeback_flag.astype(int),
-    })
+    return pd.DataFrame(rows)
 
-    return df
+def train_final(df: pd.DataFrame, k: int = 5) -> tuple[Pipeline, pd.DataFrame]:
+    pipe = build_pipeline(k)
+    labels = pipe.fit_predict(df)
+    out = df.copy()
+    out["cluster_id"] = labels
+    return pipe, out
 
 if __name__ == "__main__":
-    df = make_synthetic_customers(n=10_000, seed=42)
-    df.to_csv("data/customers_synth.csv", index=False)
-    print("Saved: data/customers_synth.csv")
-    print(df.head())
+    df = pd.read_csv("data/customers_synth.csv")
 
+    eval_df = evaluate_k(df, ks=range(2, 11))
+    eval_df.to_csv("reports/k_selection_metrics.csv", index=False)
+    print("Saved: reports/k_selection_metrics.csv")
+    print(eval_df.sort_values("silhouette", ascending=False).head(5))
+
+    pipe, clustered = train_final(df, k=5)
+    clustered.to_csv("data/customers_clustered.csv", index=False)
+    print("Saved: data/customers_clustered.csv")
+    print(clustered["cluster_id"].value_counts().sort_index())
+
+
+
+
+
+# src/profile_clusters.py
+import pandas as pd
+
+FEATURES = [
+    "recency_days",
+    "txn_count_90d",
+    "avg_txn_value",
+    "tenure_days",
+    "web_sessions_30d",
+    "app_sessions_30d",
+    "support_contacts_90d",
+    "promo_response_rate",
+    "chargeback_flag",
+]
+
+# Simple rule-based naming (portfolio-friendly). Adjust to taste.
+def name_cluster(row) -> str:
+    if row["avg_txn_value"] >= 75 and row["txn_count_90d"] >= 12 and row["recency_days"] <= 14:
+        return "VIP Loyalists"
+    if row["avg_txn_value"] >= 75 and row["recency_days"] >= 45:
+        return "At-Risk High Value"
+    if row["promo_response_rate"] >= 0.65:
+        return "Deal-Driven"
+    if row["tenure_days"] <= 200 and row["txn_count_90d"] <= 6:
+        return "New / Growing"
+    return "Dormant / Low Engagement"
+
+STRATEGY = {
+    "VIP Loyalists": "Protect: perks, priority support, surprise-and-delight, reduce friction",
+    "At-Risk High Value": "Win-back: proactive outreach, tailored incentive, remove blockers, concierge help",
+    "Deal-Driven": "Personalize promos: offer timing, discount depth tests, channel optimization",
+    "New / Growing": "Onboard: guided journey, education, early habit-forming nudges",
+    "Dormant / Low Engagement": "Low-cost reactivation or suppress: light win-back, retargeting, cost control",
+}
+
+if __name__ == "__main__":
+    df = pd.read_csv("data/customers_clustered.csv")
+
+    profile = df.groupby("cluster_id")[FEATURES].mean().round(3)
+    sizes = df["cluster_id"].value_counts().rename("cluster_size").sort_index()
+    profile = profile.join(sizes)
+
+    # Name clusters by profile
+    profile["cluster_name"] = profile.apply(name_cluster, axis=1)
+    profile["retention_strategy"] = profile["cluster_name"].map(STRATEGY)
+
+    profile = profile.reset_index().sort_values("cluster_id")
+    profile.to_csv("reports/cluster_profile.csv", index=False)
+
+    print("Saved: reports/cluster_profile.csv")
+    print(profile[["cluster_id", "cluster_name", "cluster_size", "retention_strategy"]])
